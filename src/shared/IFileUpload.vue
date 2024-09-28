@@ -5,7 +5,7 @@ import FileUpload from 'primevue/fileupload'
 defineProps<{ title: string }>()
 
 const emit = defineEmits<{
-  load: [id: String]
+  load: [id: string]
 }>()
 
 function onSelect(e: FileEventTarget) {
@@ -13,7 +13,7 @@ function onSelect(e: FileEventTarget) {
   reader.readAsText(e.files[0])
 
   reader.onload = function () {
-    emit('load', reader.result as String)
+    emit('load', reader.result as string)
   }
 
   reader.onerror = function () {

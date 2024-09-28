@@ -11,6 +11,7 @@ interface Item {
   desc: string
   src: string
   level: string
+  extended: string
 }
 
 interface ItemCraft {
@@ -28,9 +29,11 @@ interface Craft {
 
 const craftItems = ref<ItemCraft[]>([])
 const itemsDesc = ref<{ [key: string]: Item }>({})
+const isBaseItemsReady = ref(false)
 const isItemsReady = ref(false)
 
 const itemsBarValue = ref(0)
+const additionalItemsBarValue = ref(0)
 const craftBarValue = ref(0)
 
 function onLoadCraft(craft: String) {
@@ -111,7 +114,8 @@ function onLoadCraft(craft: String) {
       forge: itemCraft[0]?.forge || '',
       alterForge: itemCraft[1]?.forge || '',
       craft: itemCraft[0]?.craft || [],
-      alterCraft: itemCraft[1]?.craft || []
+      alterCraft: itemCraft[1]?.craft || [],
+      extended: value.extended
     })
   }
 
@@ -125,13 +129,13 @@ function onLoadCraft(craft: String) {
   createFile(result, 'craft')
 }
 
-function cleanString(str: String) {
+function cleanString(str: string) {
   if (str.startsWith('ff') || str.startsWith('FF') || str.startsWith('00')) return str.slice(8)
   if (str.startsWith('"ff') || str.startsWith('"FF') || str.startsWith('"00')) return str.slice(9)
   return str
 }
 
-function getLevel(desc: String) {
+function getLevel(desc: string) {
   if (desc.includes('уровня и выше!')) {
     return desc.split(' уровня и выше!')[0].split(' ').at(-1) || '0'
   }
@@ -141,15 +145,7 @@ function getLevel(desc: String) {
   return '0'
 }
 
-function onLoadItems(items: String) {
-  function cleanItem() {
-    return {
-      name: '',
-      desc: '',
-      src: ''
-    }
-  }
-
+function onLoadItems(items: string) {
   let currentItem = cleanItem()
   let itemCode = ''
   const itemsLines = items.split('\r\n')
@@ -173,7 +169,8 @@ function onLoadItems(items: String) {
             .replace('war3mapImported\\', ''),
           name: cleanString(currentItem.name).replaceAll('"', ''),
           desc: descr,
-          level: getLevel(descr)
+          level: getLevel(descr),
+          extended: ''
         }
       }
 
@@ -185,7 +182,7 @@ function onLoadItems(items: String) {
     if (line.startsWith('Description')) currentItem.desc = line.split('Description=')[1]
   }
   itemsBarValue.value = 100
-  isItemsReady.value = true
+  isBaseItemsReady.value = true
   // createFile(itemsDesc.value, 'items')
 }
 
@@ -197,15 +194,105 @@ function createFile(data: any, name: String) {
   link.click()
   URL.revokeObjectURL(link.href)
 }
+
+function cleanItem() {
+  return {
+    name: '',
+    desc: '',
+    src: ''
+  }
+}
+// для файла из оригинала карты
+function onLoadOrginalItems(items: string) {
+  let currentItem = cleanItem()
+  let itemCode = ''
+  const itemsLines = items.split('\r\n')
+
+  for (let [index, line] of itemsLines.entries()) {
+    itemsBarValue.value = (100 / itemsLines.length) * index
+    line = line.replaceAll('|c', '').replaceAll('|r', '')
+    if (line.startsWith('[')) {
+      if (itemCode) {
+        const descr = currentItem.desc
+          .split('\n')
+          .map((str) => cleanString(str))
+          .join('\n')
+          .replaceAll('ffff0000', '')
+          .replaceAll('ff80ff80', '')
+          .replaceAll('ff80ff80', '')
+          .replaceAll('"', '')
+        itemsDesc.value[itemCode] = {
+          name: cleanString(currentItem.name).replaceAll('"', '').replaceAll('\\', ''),
+          level: getLevel(descr),
+          desc: descr,
+          src: currentItem.src
+            .replace('ReplaceableTextures\\CommandButtons\\', '')
+            .replace('"ReplaceableTextures\\\\CommandButtons\\\\', '')
+            .replace('war3mapImported\\', '')
+            .replaceAll('"', ''),
+          extended: ''
+        }
+      }
+      currentItem = cleanItem()
+      itemCode = line.split('[')[1].replace(']', '')
+    }
+    if (line.startsWith('Art = ')) currentItem.src = line.split('Art = ')[1].split('.')[0] + '.png'
+    if (line.startsWith('Name')) currentItem.name = line.split('Name = ')[1]
+    if (line.startsWith('Description')) currentItem.desc = line.split('Description = ')[1]
+  }
+  itemsBarValue.value = 100
+  isBaseItemsReady.value = true
+}
+
+function loadAdditional(file: string) {
+  const itemsLines = file.split('\r\n')
+  let activeKey = null
+  let extended = ''
+
+  for (let [index, line] of itemsLines.entries()) {
+    additionalItemsBarValue.value = (100 / itemsLines.length) * index
+    if (line.startsWith('set itm = "')) {
+      const itemCommand = line.replace('set itm = "', '').replace('"', '')
+
+      for (const [key, value] of Object.entries(itemsDesc.value)) {
+        if (value.desc.includes(itemCommand)) {
+          activeKey = key
+        }
+      }
+    } else if (line.startsWith('call SaveItemCommand')) {
+      if (activeKey) {
+        itemsDesc.value[activeKey].extended = extended
+      }
+      activeKey = null
+      extended = ''
+    } else {
+      extended +=
+        line.replace('set str = "', '').replaceAll('set str = str + ', '').replaceAll('"', '') +
+        '|n'
+    }
+  }
+  additionalItemsBarValue.value = 100
+  isItemsReady.value = true
+}
 </script>
 
 <template>
   <header>Преобразование файлов с крафтом и предметами</header>
 
   <main>
-    <IFileUpload @load="onLoadItems" title="Загрузить строки с предметами" class="button" />
+    <!-- <IFileUpload @load="onLoadItems" title="Загрузить строки с предметами" class="button" /> -->
+    <IFileUpload @load="onLoadOrginalItems" title="Загрузить item.ini" class="button" />
     <ProgressBar :value="itemsBarValue" />
     <Divider />
+    <div v-if="isBaseItemsReady">
+      <IFileUpload
+        @load="loadAdditional"
+        title="Загрузить доп. описания (ItemCommandsDescInit)"
+        class="button"
+      />
+      <ProgressBar :value="additionalItemsBarValue" />
+      <Divider />
+    </div>
     <div v-if="isItemsReady">
       <IFileUpload @load="onLoadCraft" title="Загрузить строки с крафтом" class="button" />
       <ProgressBar :value="craftBarValue" />
